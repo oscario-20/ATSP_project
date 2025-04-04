@@ -1,0 +1,157 @@
+# Installiere und lade benötigte Pakete
+if (!require(quantmod)) install.packages("quantmod", dependencies = TRUE)
+if (!require(ggplot2)) install.packages("ggplot2", dependencies = TRUE)
+if (!require(dplyr)) install.packages("dplyr", dependencies = TRUE)
+if (!require(knitr)) install.packages("knitr", dependencies = TRUE)
+if (!require(kableExtra)) install.packages("kableExtra", dependencies = TRUE)
+if (!require(scales)) install.packages("scales", dependencies = TRUE)
+
+# Lade die Pakete
+library(quantmod)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(scales)
+
+# ---- 1️⃣ Lade SPY-Daten von Yahoo Finance ----
+symbol <- "SPY"
+getSymbols(symbol, src = "yahoo", from = "1993-01-01", to = Sys.Date(), auto.assign = TRUE)
+df <- get(symbol)
+
+# Erstelle Dataframe mit relevanten Spalten
+df <- data.frame(Date = index(df),
+                 Open = as.numeric(Op(df)),
+                 Close = as.numeric(Cl(df)))
+
+# Berechne Renditen für beide Strategien
+df <- df %>%
+  mutate(Overnight_Return = (Open / lag(Close)) - 1,   # Rendite: Buy Close, Sell Next Open
+         Intraday_Return = (Close / Open) - 1)        # Rendite: Buy Open, Sell Close
+
+# Entferne NA-Werte
+df <- na.omit(df)
+
+# Füge Jahresspalte hinzu
+df <- df %>%
+  mutate(Year = format(Date, "%Y"))
+
+# Geometrische Kumulation der Renditen
+df <- df %>%
+  mutate(Overnight_Strategy = 100 * (cumprod(1 + Overnight_Return) - 1),
+         Intraday_Strategy = 100 * (cumprod(1 + Intraday_Return) - 1))
+
+# ---- 2️⃣ Erstelle SPY-Plot ----
+plot_spy <- ggplot(df, aes(x = Date)) +
+  geom_line(aes(y = Overnight_Strategy, color = "Buy Close, Sell Next Open"), linewidth = 1.2) +
+  geom_line(aes(y = Intraday_Strategy, color = "Buy Open, Sell Close"), linewidth = 1.2) +
+  scale_color_manual(values = c("Buy Close, Sell Next Open" = "green", 
+                                "Buy Open, Sell Close" = "red")) +
+  scale_y_continuous(breaks = seq(0, max(df$Overnight_Strategy, df$Intraday_Strategy, na.rm = TRUE), by = 100),
+                     labels = function(x) paste0(x, "%")) +  # Y-Achse in 100er-Schritten mit %-Zeichen
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +  # Zweijährliche Intervalle
+  labs(title = "S&P 500 (SPY) After Hours vs. Regular Trading Performance",
+       x = "Date",
+       y = "Cumulative Return (%)",
+       color = "") +  # Keine Legendenüberschrift
+  theme_minimal() +
+  theme(legend.position = "top",
+        plot.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 13),
+        axis.text.x = element_text(angle = 45, hjust = 1))  # Dreht die X-Achsenbeschriftungen für bessere Lesbarkeit
+
+# ---- 3️⃣ Berechne Renditen und erstelle Renditetabelle ----
+# Berechne die jährlichen Renditen
+yearly_returns <- df %>%
+  group_by(Year) %>%
+  summarize(
+    Overnight_Year = 100 * (prod(1 + Overnight_Return) - 1),
+    Intraday_Year = 100 * (prod(1 + Intraday_Return) - 1)
+  )
+
+# Berechne die kumulierten Renditen für jedes Jahr
+cumulative_returns <- data.frame(Year = character(), 
+                                 Overnight_Cum = numeric(), 
+                                 Intraday_Cum = numeric(),
+                                 stringsAsFactors = FALSE)
+
+# Speichere alle Renditen des Dataframes in einer Liste nach Jahren
+returns_by_year <- split(df, df$Year)
+
+# Initialisiere Vektoren für die kumulierten Renditen
+all_overnight <- c()
+all_intraday <- c()
+
+for (year in unique(df$Year)) {
+  # Daten bis zum Ende des aktuellen Jahres filtern
+  data_until_year <- df %>% filter(Year <= year)
+  
+  # Kumulierte Rendite berechnen (von Anfang bis zum Ende des aktuellen Jahres)
+  overnight_cum <- 100 * (prod(1 + data_until_year$Overnight_Return) - 1)
+  intraday_cum <- 100 * (prod(1 + data_until_year$Intraday_Return) - 1)
+  
+  # Zur Liste hinzufügen
+  all_overnight <- c(all_overnight, overnight_cum)
+  all_intraday <- c(all_intraday, intraday_cum)
+}
+
+# Erstelle Dataframe für kumulierte Renditen
+cumulative_returns <- data.frame(
+  Year = unique(df$Year),
+  Overnight_Cum = all_overnight,
+  Intraday_Cum = all_intraday
+)
+
+# Berechne die Gesamtrendite und die jährlich geometrische Rendite
+years_total <- length(unique(df$Year))
+total_overnight <- cumulative_returns[nrow(cumulative_returns), "Overnight_Cum"]
+total_intraday <- cumulative_returns[nrow(cumulative_returns), "Intraday_Cum"]
+annual_geom_overnight <- 100 * ((1 + total_overnight/100)^(1/years_total) - 1)
+annual_geom_intraday <- 100 * ((1 + total_intraday/100)^(1/years_total) - 1)
+
+# Erstelle eine Zusammenfassung
+summary_data <- data.frame(
+  Year =  "Jährl. geom.",
+  Overnight_Year = c(NA, annual_geom_overnight),
+  Intraday_Year = c(NA, annual_geom_intraday),
+  Overnight_Cum = c(total_overnight, NA),
+  Intraday_Cum = c(NA, NA)
+)
+
+# Kombiniere jährliche Renditen, kumulierte Renditen und Zusammenfassung
+combined_returns <- yearly_returns %>%
+  inner_join(cumulative_returns, by = "Year") %>%
+  bind_rows(summary_data)
+
+# Formatiere die Tabelle für schönere Darstellung
+formatted_returns <- combined_returns %>%
+  mutate(
+    Overnight_Year = ifelse(is.na(Overnight_Year), "", paste0(sprintf("%.2f", Overnight_Year), "%")),
+    Intraday_Year = ifelse(is.na(Intraday_Year), "", paste0(sprintf("%.2f", Intraday_Year), "%")),
+    Overnight_Cum = ifelse(is.na(Overnight_Cum), "", paste0(sprintf("%.2f", Overnight_Cum), "%")),
+    Intraday_Cum = ifelse(is.na(Intraday_Cum), "", paste0(sprintf("%.2f", Intraday_Cum), "%"))
+  ) %>%
+  rename(
+    "Jahr" = Year,
+    "Overnight Jährlich" = Overnight_Year,
+    "Intraday Jährlich" = Intraday_Year,
+    "Overnight Kumuliert" = Overnight_Cum,
+    "Intraday Kumuliert" = Intraday_Cum
+  )
+
+# ---- 4️⃣ Zeige Plot und Tabelle ----
+# Zeige den Plot
+print(plot_spy)
+
+# Zeige die Renditetabelle mit knitr und kableExtra für eine schöne Formatierung
+cat("\n\n")
+cat("Renditetabelle für SPY Overnight vs. Intraday Strategien:\n")
+cat("\n")
+
+# Erstelle eine schöne Tabelle mit kableExtra
+kable(formatted_returns, format = "pipe", align = c("l", "r", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  row_spec(nrow(formatted_returns), bold = TRUE, background = "#C8E6C9") %>%     # Jährl. geom. Zeile
+  print()
+

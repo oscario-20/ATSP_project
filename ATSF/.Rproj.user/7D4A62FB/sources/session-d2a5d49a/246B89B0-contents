@@ -1,0 +1,281 @@
+# Installiere und lade benötigte Pakete
+required_packages <- c("quantmod", "ggplot2", "dplyr", "lubridate", "gridExtra")
+new_packages <- required_packages[!required_packages %in% installed.packages()[,"Package"]]
+if(length(new_packages)) install.packages(new_packages)
+
+# Lade die Pakete
+library(quantmod)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(gridExtra)
+
+# ---- 1️⃣ Lade SPY-Daten von Yahoo Finance (mit Cache) ----
+symbol <- "SPY"
+data_file <- paste0(symbol, "_data.RDS")
+
+# Prüfe, ob bereits gecachte Daten existieren
+if(file.exists(data_file)) {
+  # Wenn ja, lade die gecachten Daten
+  cat("Lade gecachte Daten...\n")
+  df <- readRDS(data_file)
+  
+  # Prüfe, ob die Daten aktualisiert werden müssen
+  last_date <- max(df$Date)
+  today <- Sys.Date()
+  
+  if(difftime(today, last_date, units="days") > 1) {
+    cat("Aktualisiere Daten...\n")
+    # Lade nur die neuen Daten
+    new_data <- getSymbols(symbol, src = "yahoo", from = last_date + 1, to = today, auto.assign = FALSE)
+    
+    if(nrow(new_data) > 0) {
+      # Konvertiere neue Daten in das gleiche Format
+      new_df <- data.frame(
+        Date = index(new_data),
+        Open = as.numeric(Op(new_data)),
+        Close = as.numeric(Cl(new_data))
+      )
+      
+      # Füge die neuen Daten hinzu
+      df <- rbind(df, new_df)
+    }
+  }
+} else {
+  # Wenn keine gecachten Daten existieren, lade alle Daten
+  cat("Lade Daten von Yahoo Finance...\n")
+  data <- getSymbols(symbol, src = "yahoo", from = "1993-01-01", to = Sys.Date(), auto.assign = FALSE)
+  
+  # Erstelle Dataframe mit relevanten Spalten
+  df <- data.frame(
+    Date = index(data),
+    Open = as.numeric(Op(data)),
+    Close = as.numeric(Cl(data))
+  )
+  
+  # Speichere die Daten für zukünftige Verwendung
+  saveRDS(df, data_file)
+}
+
+# ---- 2️⃣ Berechne Renditen (optimiert) ----
+cat("Berechne Renditen...\n")
+
+# Füge Jahresspalte hinzu
+df <- df %>%
+  arrange(Date) %>%
+  mutate(Year = year(Date))
+
+# Berechne Renditen für alle Strategien
+df <- df %>%
+  mutate(
+    Overnight_Return = (Open / lag(Close) - 1),
+    Intraday_Return = (Close / Open - 1)
+  ) %>%
+  filter(!is.na(Overnight_Return))  # Entferne NA-Werte effizienter
+
+# ---- 3️⃣ Berechne die kumulierten Renditen effizienter ----
+cat("Berechne kumulierte Renditen...\n")
+
+# Berechne kumulierte Produkte für die ersten beiden Strategien
+df <- df %>%
+  mutate(
+    Overnight_Cumulative = cumprod(1 + Overnight_Return),
+    Intraday_Cumulative = cumprod(1 + Intraday_Return)
+  )
+
+# Für die Positive Overnight Strategie nehmen wir einen anderen Ansatz
+# Wir investieren nur an Tagen mit positiver Overnight-Rendite
+df$Positive_Overnight_Cumulative <- numeric(nrow(df))
+cumulative_value <- 1.0
+
+for (i in 1:nrow(df)) {
+  if (df$Overnight_Return[i] > 0) {
+    # Nur an positiven Tagen investieren
+    cumulative_value <- cumulative_value * (1 + df$Overnight_Return[i])
+  }
+  # Speichere den aktuellen kumulativen Wert
+  df$Positive_Overnight_Cumulative[i] <- cumulative_value
+}
+
+# ---- 4️⃣ Bereite Daten für den Plot vor (verwende Subsample für schnelleres Plotten) ----
+cat("Bereite Plot-Daten vor...\n")
+# Subsample für den Plot (wenn mehr als 1000 Datenpunkte)
+if (nrow(df) > 1000) {
+  # Nehme jeden n-ten Datenpunkt für den Plot
+  n <- ceiling(nrow(df) / 1000)
+  plot_data <- df[seq(1, nrow(df), by = n), ]
+} else {
+  plot_data <- df
+}
+
+# Berechne die prozentualen Renditen für den Plot
+plot_data <- plot_data %>%
+  mutate(
+    Overnight_Strategy = 100 * (Overnight_Cumulative - 1),
+    Intraday_Strategy = 100 * (Intraday_Cumulative - 1),
+    Positive_Overnight_Strategy = 100 * (Positive_Overnight_Cumulative - 1)
+  )
+
+# ---- 5️⃣ Erstelle zwei separate Plots ----
+cat("Erstelle Plots...\n")
+
+# Plot 1: Ursprüngliche Strategien (Overnight und Intraday)
+plot_original <- ggplot(plot_data, aes(x = Date)) +
+  geom_line(aes(y = Overnight_Strategy, color = "Buy Close, Sell Next Open"), linewidth = 1.2) +
+  geom_line(aes(y = Intraday_Strategy, color = "Buy Open, Sell Close"), linewidth = 1.2) +
+  scale_color_manual(values = c("Buy Close, Sell Next Open" = "green", 
+                                "Buy Open, Sell Close" = "red")) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  labs(title = "Original SPY Trading Strategies",
+       x = "Date",
+       y = "Cumulative Return (%)",
+       color = "") +
+  theme_minimal() +
+  theme(legend.position = "top",
+        plot.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 13),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot 2: Nur positive Overnight-Trades
+plot_positive <- ggplot(plot_data, aes(x = Date)) +
+  geom_line(aes(y = Positive_Overnight_Strategy, color = "Only Positive Overnight Trades"), linewidth = 1.2) +
+  scale_color_manual(values = c("Only Positive Overnight Trades" = "blue")) +
+  # Feste Y-Achsenskalierung für bessere Lesbarkeit
+  scale_y_continuous(labels = function(x) paste0(round(x, 2), "%")) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  labs(title = "Only Positive Overnight Trades Strategy",
+       x = "Date",
+       y = "Cumulative Return (%)",
+       color = "") +
+  theme_minimal() +
+  theme(legend.position = "top",
+        plot.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 13),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Erstelle ein zusammengesetztes Plot-Objekt für gridExtra
+require(gridExtra)
+plot_spy <- grid.arrange(plot_original, plot_positive, ncol = 2)
+
+# ---- 6️⃣ Berechne jährliche Renditen ----
+cat("Berechne jährliche Renditen...\n")
+
+# Berechne die jährlichen Renditen effizienter
+yearly_returns <- df %>%
+  group_by(Year) %>%
+  summarize(
+    # Anzahl der Handelstage insgesamt
+    Trading_Days = n(),
+    
+    # Anzahl der positiven Overnight-Tage
+    Positive_Days = sum(Overnight_Return > 0),
+    
+    # Prozentsatz der positiven Tage
+    Percent_Positive = round(100 * Positive_Days / Trading_Days, 2),
+    
+    # Arithmetische Renditen (Summe)
+    Overnight_Arith = 100 * sum(Overnight_Return),
+    Intraday_Arith = 100 * sum(Intraday_Return),
+    
+    # Arithmetische Rendite für positive Overnight-Tage - nur für positive Tage summieren
+    Positive_Overnight_Arith = 100 * sum(Overnight_Return[Overnight_Return > 0]),
+    
+    # Geometrische Renditen (Produkt)
+    Overnight_Geom = 100 * (prod(1 + Overnight_Return) - 1),
+    Intraday_Geom = 100 * (prod(1 + Intraday_Return) - 1),
+    
+    # Erste und letzte Werte des Jahres für geometrische Rendite der positiven Overnight-Strategie
+    First_Positive_Value = first(Positive_Overnight_Cumulative),
+    Last_Positive_Value = last(Positive_Overnight_Cumulative),
+    
+    # Letzte kumulierte Werte des Jahres
+    Last_Date = max(Date),
+    .groups = "drop"
+  ) %>%
+  # Berechne geometrische Rendite für positive Overnight-Strategie
+  mutate(
+    Positive_Overnight_Geom = 100 * (Last_Positive_Value / First_Positive_Value - 1)
+  )
+
+# Hole die kumulierten Werte für jedes Jahr
+yearly_cumulative <- df %>%
+  group_by(Year) %>%
+  filter(Date == max(Date)) %>%
+  select(Year, Overnight_Cumulative, Intraday_Cumulative, Positive_Overnight_Cumulative)
+
+# Füge die kumulierten Werte zu den jährlichen Renditen hinzu
+yearly_returns <- yearly_returns %>%
+  left_join(yearly_cumulative, by = "Year") %>%
+  mutate(
+    Overnight_Cum = 100 * (Overnight_Cumulative - 1),
+    Intraday_Cum = 100 * (Intraday_Cumulative - 1),
+    Positive_Overnight_Cum = 100 * (Positive_Overnight_Cumulative - 1)
+  ) %>%
+  select(-Overnight_Cumulative, -Intraday_Cumulative, -Positive_Overnight_Cumulative, 
+         -Last_Date, -First_Positive_Value, -Last_Positive_Value)
+
+# ---- 7️⃣ Berechne Durchschnitte ----
+cat("Berechne Durchschnitte...\n")
+# Zeitraum in Jahren
+first_year <- min(df$Year)
+last_year <- max(df$Year)
+years_total <- last_year - first_year + 1
+
+# Letzte kumulierte Werte
+last_values <- df %>%
+  filter(Date == max(Date)) %>%
+  select(Overnight_Cumulative, Intraday_Cumulative, Positive_Overnight_Cumulative)
+
+# Arithmetische Durchschnitte (pro Jahr)
+avg_overnight_arith <- 100 * mean(df$Overnight_Return) * 252  # Annahme: 252 Handelstage pro Jahr
+avg_intraday_arith <- 100 * mean(df$Intraday_Return) * 252
+avg_positive_overnight_arith <- 100 * mean(df$Positive_Overnight_Return) * 252
+
+# Geometrische Durchschnitte (annualisiert)
+annual_geom_overnight <- 100 * ((last_values$Overnight_Cumulative)^(1/years_total) - 1)
+annual_geom_intraday <- 100 * ((last_values$Intraday_Cumulative)^(1/years_total) - 1)
+annual_geom_positive_overnight <- 100 * ((last_values$Positive_Overnight_Cumulative)^(1/years_total) - 1)
+
+# Konvertiere Year in yearly_returns zu Zeichenkette
+yearly_returns <- yearly_returns %>%
+  mutate(Year = as.character(Year))
+
+# Erstelle einen Dataframe für die Zusammenfassung
+summary_data <- data.frame(
+  Year = "Durchschnitt",
+  Trading_Days = nrow(df) / years_total,
+  Overnight_Arith = avg_overnight_arith,
+  Intraday_Arith = avg_intraday_arith,
+  Positive_Overnight_Arith = avg_positive_overnight_arith,
+  Overnight_Geom = annual_geom_overnight,
+  Intraday_Geom = annual_geom_intraday,
+  Positive_Overnight_Geom = annual_geom_positive_overnight,
+  Overnight_Cum = 100 * (last_values$Overnight_Cumulative - 1),
+  Intraday_Cum = 100 * (last_values$Intraday_Cumulative - 1),
+  Positive_Overnight_Cum = 100 * (last_values$Positive_Overnight_Cumulative - 1)
+)
+
+# Kombiniere jährliche Renditen und Zusammenfassung
+combined_results <- bind_rows(yearly_returns, summary_data)
+
+# ---- 8️⃣ Zeige Plot und Renditetabelle ----
+cat("Zeige Ergebnisse...\n")
+
+# Zeige den Plot
+print(plot_spy)
+
+# Zeige die vereinfachte Tabelle in der Konsole
+cat("\n\nJährliche Renditen für SPY-Handelsstrategien:\n\n")
+
+# Formatiere die Ergebnisse für die Anzeige
+display_results <- combined_results %>%
+  mutate(across(where(is.numeric) & !Trading_Days, ~ round(., 2))) %>%
+  mutate(Trading_Days = round(Trading_Days))
+
+# Zeige die Tabelle
+print(display_results)
+
+cat("\n\nAnalyse abgeschlossen.\n")

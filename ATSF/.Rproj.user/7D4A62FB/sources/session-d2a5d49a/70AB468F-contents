@@ -1,0 +1,82 @@
+# Installiere und lade benötigte Pakete
+if (!require(quantmod)) install.packages("quantmod", dependencies = TRUE)
+if (!require(ggplot2)) install.packages("ggplot2", dependencies = TRUE)
+if (!require(dplyr)) install.packages("dplyr", dependencies = TRUE)
+# Lade die Pakete
+library(quantmod)
+library(ggplot2)
+library(dplyr)
+
+# ---- 1️⃣ Lade SPY-Daten von Yahoo Finance ----
+symbol <- "SPY"
+getSymbols(symbol, src = "yahoo", from = "1993-01-01", to = Sys.Date(), auto.assign = TRUE)
+df <- get(symbol)
+
+# Erstelle Dataframe mit relevanten Spalten
+df <- data.frame(Date = index(df),
+                 Open = as.numeric(Op(df)),
+                 Close = as.numeric(Cl(df)))
+
+# Berechne Renditen für alle drei Strategien
+df <- df %>%
+  mutate(Overnight_Return = (Open / lag(Close)) - 1,   # Rendite: Buy Close, Sell Next Open
+         Intraday_Return = (Close / Open) - 1,         # Rendite: Buy Open, Sell Close
+         Daily_Return = (Close / lag(Close)) - 1)      # Rendite: Buy and Hold (tägliche Rendite)
+
+# Entferne NA-Werte
+df <- na.omit(df)
+
+# Geometrische Kumulation der Renditen
+df <- df %>%
+  mutate(Overnight_Strategy = 100 * (cumprod(1 + Overnight_Return) - 1),
+         Intraday_Strategy = 100 * (cumprod(1 + Intraday_Return) - 1),
+         Buy_Hold_Strategy = 100 * (cumprod(1 + Daily_Return) - 1))
+
+# ---- 2️⃣ Erstelle SPY-Plot im exakten Stil ----
+plot_spy <- ggplot(df, aes(x = Date)) +
+  geom_line(aes(y = Overnight_Strategy, color = "Buy Close, Sell Next Open"), linewidth = 1.2) +
+  geom_line(aes(y = Intraday_Strategy, color = "Buy Open, Sell Close"), linewidth = 1.2) +
+  geom_line(aes(y = Buy_Hold_Strategy, color = "Buy and Hold"), linewidth = 1.2) +
+  scale_color_manual(values = c("Buy Close, Sell Next Open" = "green", 
+                                "Buy Open, Sell Close" = "red",
+                                "Buy and Hold" = "blue")) +
+  scale_y_continuous(breaks = seq(0, max(df$Overnight_Strategy, df$Intraday_Strategy, df$Buy_Hold_Strategy, na.rm = TRUE), by = 100)) +  # Y-Achse in 100er-Schritten
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +  # Zweijährliche Intervalle für bessere Lesbarkeit
+  labs(title = "S&P 500 (SPY) After Hours vs. Regular Trading vs. Buy-and-Hold Performance",
+       x = "Date",
+       y = "Cumulative Return (%)",
+       color = "") +  # Keine Legendenüberschrift
+  theme_minimal() +
+  theme(legend.position = "top",
+        plot.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 13),
+        axis.text.x = element_text(angle = 45, hjust = 1))  # Dreht die X-Achsenbeschriftungen für bessere Lesbarkeit
+
+# ---- 3️⃣ Plot anzeigen ----
+print(plot_spy)
+
+# ---- 4️⃣ Zusammenfassung der Ergebnisse ----
+# Berechne die Endrenditen und annualisierte Renditen
+n_years <- as.numeric(difftime(max(df$Date), min(df$Date), units = "days")) / 365.25
+
+summary_df <- data.frame(
+  Strategie = c("Overnight (Close-to-Open)", "Intraday (Open-to-Close)", "Buy and Hold"),
+  Gesamtrendite = c(
+    tail(df$Overnight_Strategy, 1),
+    tail(df$Intraday_Strategy, 1),
+    tail(df$Buy_Hold_Strategy, 1)
+  ),
+  Annualisierte_Rendite = c(
+    (1 + tail(df$Overnight_Strategy, 1)/100)^(1/n_years) - 1,
+    (1 + tail(df$Intraday_Strategy, 1)/100)^(1/n_years) - 1,
+    (1 + tail(df$Buy_Hold_Strategy, 1)/100)^(1/n_years) - 1
+  ) * 100
+)
+
+# Formatiere die Ergebnisse
+summary_df$Gesamtrendite <- round(summary_df$Gesamtrendite, 2)
+summary_df$Annualisierte_Rendite <- round(summary_df$Annualisierte_Rendite, 2)
+
+# Zeige die Zusammenfassung an
+print(summary_df)

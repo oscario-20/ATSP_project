@@ -1,0 +1,493 @@
+# Topic: regression vs. simple feedforward based on nn
+#   Application to bitcoin
+
+rm(list=ls())
+
+
+inst_pack<-rownames(installed.packages())
+
+if (!"neuralnet"%in%inst_pack)
+  install.packages("neuralnet")
+if (!"fGarch"%in%inst_pack)
+  install.packages("fGarch")
+if (!"xts"%in%inst_pack)
+  install.packages("xts")
+if (!"xts"%in%inst_pack)
+  install.packages("quantmod")
+
+
+library(neuralnet)
+library(fGarch)
+library(xts)
+library(quantmod)
+
+# BTC laden
+getSymbols("BTC")
+tail(BTC,n=3)
+# Sehr kurze Reihe: kostenpflichtig
+head(BTC)
+
+
+
+###################################################################
+# Exercise 1: Load Bitcoin data
+# 1.a
+
+setwd("C:/Users/Oscar/OneDrive - ZHAW/s - FS 2025/ATSF/17.02.2025 intro NN bitcoin")
+path.dat<-getwd()
+#path.dat<-paste(path.main,"/Exercises/Erste Woche/Data/",sep="")
+
+load(paste(path.dat,"/bitcoin.Rdata",sep=""))
+#-------------------
+# 1.b
+head(dat)
+tail(dat)
+class(dat)
+#-------------------
+# 1.c Plot  data 
+
+
+# plot last, bid and ask in single figure names(dat)
+par(mfrow=c(2,2))
+plot(dat$Bid,col=1,main="Prices")
+plot(log(dat$Bid),col=1,on=1,main="Log-prices")  #tail(dat$Bid)
+plot(diff(log(dat$Bid)),col=1,on=1,main="Log-returns")
+plot(log(dat$Volume),col=1,on=1,main="Log-volumes")
+
+
+#-----------------------------
+# 1.d
+# Evidence: vola-clustering
+
+########################################################################################-----------------------------
+# Fit a GARCH to log-returns
+# 2.a
+
+x_fit<-as.ts(na.omit(diff(log(dat$Bid))))
+# GARCH(1,1)
+y.garch_11<-garchFit(~garch(1,1),data=x_fit,delta=2,include.delta=F,include.mean=F,trace=F)
+
+ts.plot(x_fit)
+lines(y.garch_11@sigma.t,col="red")
+#-----------------
+# 2.b
+standard_residuals<-y.garch_11@residuals/y.garch_11@sigma.t
+ts.plot(standard_residuals)
+#-----------------
+# 2.c
+par(mfrow=c(2,1))
+acf(x_fit,main="Acf log-returns",ylim=c(0,0.1))
+acf(standard_residuals,main="Acf standardized residuals GARCH(1,1)",ylim=c(0,0.1))
+
+####################################################################
+# Classic linear regression: applied to Bid-prices
+# Specify target and explanatory data: we use first six lags based on above data analysis
+# 3.2
+x<-na.omit(diff(log(dat$Bid)))
+head(x)
+typeof(x)
+
+#------------------
+# 3.b
+# package: xt.... before using lag(....)
+# data_mat<-cbind(x,lag(x),lag(x,k=2),lag(x,k=3),lag(x,k=4),lag(x,k=5),lag(x,k=6))
+data_mat <- cbind(
+  x,
+  stats::lag(x, -1),
+  stats::lag(x, -2),
+  stats::lag(x, -3),
+  stats::lag(x, -4),
+  stats::lag(x, -5),
+  stats::lag(x, -6)
+)
+
+# Check length of time series before na.exclude
+dim(data_mat)
+data_mat<-na.exclude(data_mat)
+# Check length of time series after removal of NAs
+dim(data_mat)
+head(data_mat)
+tail(data_mat)
+
+#--------------------------------------------------------------------
+# 3.c&d Specify in- and out-of-sample episodes
+in_out_sample_separator<-"2015-06-01"
+#in_out_sample_separator<-"2017-06-01"
+
+target_in<-data_mat[paste("/",in_out_sample_separator,sep=""),1]
+tail(target_in)
+explanatory_in<-data_mat[paste("/",in_out_sample_separator,sep=""),2:ncol(data_mat)]
+tail(explanatory_in)
+
+target_out<-data_mat[paste(in_out_sample_separator,"/",sep=""),1]
+head(target_out)
+tail(target_out)
+explanatory_out<-data_mat[paste(in_out_sample_separator,"/",sep=""),2:ncol(data_mat)]
+head(explanatory_out)
+tail(explanatory_out)
+
+train<-cbind(target_in,explanatory_in)
+test<-cbind(target_out,explanatory_out)
+head(test)
+tail(test)
+nrow(train)
+nrow(test)
+#-------------------------------------------
+# 3.e&f
+# Fitting linear model to log-returns (could be applied to standardized log-returns: returns divided by vola)
+lm.fit <- lm(target_in~explanatory_in)#mean(target_in)plot(cumsum(target_in))plot(log(dat$Bid))
+summary(lm.fit)
+# Without intercept
+lm.fit <- lm(target_in~explanatory_in-1)
+summary(lm.fit)
+#----------------------------------------------
+# 3.g
+# Predicted data from lm
+#   Without intercept
+predicted_lm<-explanatory_out%*%lm.fit$coef
+
+# Same as above single line of code (but more explicit: row-wise computation)
+for (i in 1:nrow(explanatory_out))
+{
+  predicted_lm[i,]<-sum(explanatory_out[i,]*lm.fit$coef)
+}  
+
+# With intercept: we have to add a column of 1s to the explanatory data (for the additional intercept)
+if (length(lm.fit$coef)>ncol(explanatory_out))
+  predicted_lm<-cbind(rep(1,nrow(explanatory_out)),explanatory_out)%*%lm.fit$coef
+
+
+
+#------------------------------------------
+# 3.h
+# Test MSE: in-sample vs. out-of-sample
+MSE.in.lm<-mean(lm.fit$residuals^2)
+MSE.out.lm <- sum((predicted_lm - target_out)^2)/nrow(test)
+c(MSE.in.lm,MSE.out.lm)
+#--------------------------------
+# 3.i Trading performance
+perf_lm<-(sign(predicted_lm))*target_out
+
+
+sharpe_lm<-sqrt(365)*mean(perf_lm,na.rm=T)/sqrt(var(perf_lm,na.rm=T))
+par(mfrow=c(1,1))
+plot(cumsum(perf_lm),main=paste("Linear regression cumulated performances out-of-sample, sharpe=",round(sharpe_lm,2),sep=""))
+
+#-------------------------------------------------------------------------------
+# 4. Neural net fitting
+
+# 4.a
+# Scaling data for the NN
+maxs <- apply(data_mat, 2, max) 
+mins <- apply(data_mat, 2, min)
+# Transform data into [0,1]  
+scaled <- scale(data_mat, center = mins, scale = maxs - mins)
+  
+apply(scaled,2,min)
+apply(scaled,2,max)
+#-----------------
+# 4.b
+# Train-test split
+train_set <- scaled[paste("/",in_out_sample_separator,sep=""),]
+test_set <- scaled[paste(in_out_sample_separator,"/",sep=""),]
+
+train_set<-as.matrix(train_set)
+test_set<-as.matrix(test_set)
+#-----------------------------------
+# 4.c
+
+colnames(train_set)<-paste("lag",0:(ncol(train_set)-1),sep="")
+n <- colnames(train_set)
+# Model: target is current bitcoin, all other variables are explanatory  
+f <- as.formula(paste("lag0 ~", paste(n[!n %in% "lag0"], collapse = " + ")))
+
+tail(train_set)
+
+# Set/fix the random seed 
+set.seed(3)
+nn <- neuralnet(f,data=train_set,hidden=c(3,2),linear.output=F)
+#------------------------------------
+# 4.d (compare different realizations of the above net: train the net without specifying set.seed)
+plot(nn)
+
+#----------------------------------------------
+# 4.e
+# In sample performance
+# 1. Without re-scaling: MSE based on transformed data
+MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*(max(data_mat[,1])-min(data_mat[,1])))^2)
+# 2. With re-scaling: MSE based on scale of original data
+scaling_term<-(max(data_mat[,1])-min(data_mat[,1]))
+MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*scaling_term)^2)
+
+# Out-of-sample performance
+# 1. Compute out-of-sample predictions based on transformed data
+# Provide test-data to predict: use explanatory columns 2:ncol(test_set) (First column is forecast target)
+pr.nn <- predict(nn,test_set[,2:ncol(test_set)])
+predicted_scaled<-pr.nn
+# Numbers are between 0 and 1
+tail(predicted_scaled)
+# Transform forecasts back to original data: rescale and shift by min(data_mat[,1])
+predicted_nn <- predicted_scaled*scaling_term+min(data_mat[,1])
+test.r <- test_set[,1]*scaling_term+min(data_mat[,1])
+# Check: test.r is the same as test[,1]
+test[,1]-test.r
+# Calculating MSE
+MSE.out.nn <- sum((test.r - predicted_nn)^2)/nrow(test_set)
+
+# Compare in-sample and out-of-sample
+c(MSE.in.nn,MSE.out.nn)
+
+# Compare Regression and nn in-sample: which model would you prefer/select?
+print(paste(MSE.in.lm,MSE.in.nn))
+# Compare Regression and nn in-sample: which model was better
+print(paste(MSE.out.lm,MSE.out.nn))
+
+#--------------------------------
+# 4.f Trading performance
+perf_nn<-(sign(predicted_nn))*target_out
+
+
+sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
+
+plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample, sharpe=",round(sharpe_nn,2),sep=""))
+
+####################################################################
+# Exercise 5: 
+#   Set linear.output=F in neuralnet-call
+#   Use the following train-set (target is the sign of tomorrow's bitcoin)
+#     train_set_directional<-train_set
+#     train_set_directional[,1]<-sign(target_in)
+#   Use the following validation-set (target is the sign of tomorrow's bitcoin)
+#     test_set_directional<-test_set
+#     test_set_directional[,1]<-sign(target_out)
+
+##############################################################################
+# Exercise 6: Effect of random seed and net architecture
+# 6.a
+
+
+estimate_nn<-function(train_set,number_neurons,data_mat,test_set,f)
+{
+  nn <- neuralnet(f,data=train_set,hidden=number_neurons,linear.output=T)
+  
+
+# In sample performance
+  predicted_scaled_in_sample<-nn$net.result[[1]]
+# Scale back from interval [0,1] to original log-returns
+  predicted_nn_in_sample<-predicted_scaled_in_sample*(max(data_mat[,1])-min(data_mat[,1]))+min(data_mat[,1])
+# In-sample MSE
+  MSE.in.nn<-mean(((train_set[,1]-predicted_scaled_in_sample)*(max(data_mat[,1])-min(data_mat[,1])))^2)
+  
+# Out-of-sample performance
+# Compute out-of-sample forecasts
+  pr.nn <- predict(nn,as.matrix(test_set[,2:ncol(test_set)]))
+  predicted_scaled<-pr.nn
+# Results from NN are normalized (scaled)
+# Descaling for comparison
+  predicted_nn <- predicted_scaled*(max(data_mat[,1])-min(data_mat[,1]))+min(data_mat[,1])
+  test.r <- test_set[,1]*(max(data_mat[,1])-min(data_mat[,1]))+min(data_mat[,1])
+# Calculating MSE
+  MSE.out.nn <- mean((test.r - predicted_nn)^2)
+  
+# Compare in-sample and out-of-sample
+  MSE_nn<-c(MSE.in.nn,MSE.out.nn)
+  return(list(MSE_nn=MSE_nn,predicted_nn=predicted_nn,predicted_nn_in_sample=predicted_nn_in_sample))
+  
+}
+
+
+#----------------
+# 6.b
+# One can easily change the net-architecture: number_neurons<-c(6,2)
+
+
+anzsim<-100
+set.seed(0)
+number_neurons<-c(3,2)
+MSE_mat<-matrix(ncol=2,nrow=anzsim)
+colnames(MSE_mat)<-c("In sample MSE","Out sample MSE")
+
+pb <- txtProgressBar(min = 1, max = anzsim, style = 3)
+
+for (i in 1:anzsim)#i<-12
+{
+  MSE_mat[i,]<-estimate_nn(train_set,number_neurons,data_mat,test_set,f)$MSE_nn
+  print(c(i,MSE_mat[i,]))
+  setTxtProgressBar(pb, i)
+  
+}
+close(pb)
+#-----------------------------------
+# 6.c
+# Mean performances in-sample and out-of-sample
+# Out-of-sample markedly worse (this might be due in part to vola-clustering)
+apply(MSE_mat,2,mean)
+# Variance of MSE out-of-sample much larger: much more variation in performances
+sqrt(apply(MSE_mat,2,var))
+#---------------------------------
+# 6.d
+paste("In the mean: ",100*(apply(MSE_mat,2,mean)[2]/apply(MSE_mat,2,mean)[1]-1),"% worse out-of-sample")
+paste("Best case: ",100*(min(MSE_mat[,"Out sample MSE"]/MSE_mat[,"In sample MSE"])-1),"% worse out of sample")
+paste("Worst case: ",100*(max(MSE_mat[,"Out sample MSE"]/MSE_mat[,"In sample MSE"])-1),"% worse out of sample")
+
+#----------------------------
+# 6.e
+# Does a better in-sample performance imply a better out-of-sample too?
+# A rapid inspection of performance_mat does not suggest so...
+
+MSE_mat
+
+# Ordering: from smallest to largest
+MSE_mat[order(MSE_mat[,1]),1]
+
+# Small correlation between in-sample and out-of-sample MSEs
+cor(MSE_mat[,1],MSE_mat[,2])
+# Small correlation between ranks...
+cor(order(MSE_mat[,1]),order(MSE_mat[,2]))
+#------------------------------------
+# 6.f
+apply(MSE_mat,2,mean)
+c(MSE.in.lm,MSE.out.lm)
+
+
+#######################################################################################3--------------------------------------------
+# Exercise 7
+# Effect of net architecture
+# You may run the previous code for various settings (number of layers and/or number of neurons per layer)
+
+number_neurons<-c(6,2)
+
+
+
+######################################################################################
+
+# Exercise 7 Effect of net architecture
+#   We compute performances for various runs (random seeds) and plot effective out-of-sample performances
+# We are interested in sharpes as well as in correlation with lm forecasts
+
+# 7.a
+# One could try different architectures: number of layers and/or number of neurons
+# This is possibly too simple
+number_neurons<-c(3,2)
+number_neurons<-c(6,4)
+# Better
+number_neurons<-c(12,6)
+# Better
+number_neurons<-c(20,10)
+# Probably too much... Performance worse 
+#number_neurons<-c(50,20)
+anz_real<-10
+corr_vec<-sharpe_nn<-sharpe_nn_in<-1:anz_real
+MSE_mat<-matrix(ncol=2,nrow=anz_real)
+colnames(MSE_mat)<-c("In sample MSE","Out sample MSE")
+#-----------------------
+# 7.b
+
+pb <- txtProgressBar(min = 1, max = anz_real, style = 3)
+
+# One could try alternative set.seeds and/or larger anz_real
+set.seed(1)
+for (i in 1:anz_real)
+{
+# Use the above function to fit the net and obtain predictions for original data (re-scaled and shifted back to BTC returns)
+  nn.obj<-estimate_nn(train_set,number_neurons,data_mat,test_set,f)
+# Out-of-sample predictions for original BTC  
+  predicted_nn<-nn.obj$predicted_nn
+# In-sample predictions  
+  predicted_nn_in_sample<-nn.obj$predicted_nn_in_sample
+# In- and out-of-sample MSE  
+  MSE_mat[i,]<-nn.obj$MSE_nn
+# Prediction of regression model (this is fixed i.e. it does not depend on loop)  
+  predicted_lm<-as.double(explanatory_out%*%lm.fit$coef)
+# Trading  
+# Go long or short depending on sign of forecast
+#   We do not need to lag the signal here since the forecast is based on (already) lagged data 
+  perf_lm<-(sign(predicted_lm))*target_out
+  perf_nn<-(sign(predicted_nn))*target_out
+  perf_nn_in<-(sign(predicted_nn_in_sample))*target_in
+# Collect the trading performances (daily returns) for each random net  
+  if (i==1)
+  {  
+    perf_nn_mat<-perf_nn
+    perf_nn_mat_in<-perf_nn_in
+  } else
+  {
+    perf_nn_mat<-cbind(perf_nn_mat,perf_nn)
+    perf_nn_mat_in<-cbind(perf_nn_mat_in,perf_nn_in)
+  }
+# Correlation between in-sample and out-of-sample performances  
+  corr_vec[i]<-cor(perf_lm,perf_nn)
+  
+  sharpe_nn[i]<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
+  sharpe_nn_in[i]<-sqrt(365)*mean(perf_nn_in,na.rm=T)/sqrt(var(perf_nn_in,na.rm=T))
+  sharpe_lm<-as.double(sqrt(365)*mean(perf_lm,na.rm=T)/sqrt(var(perf_lm,na.rm=T)))
+  
+  setTxtProgressBar(pb, i)
+}
+close(pb)
+
+#----------------------------------------
+# 7.c
+# Cumulated daily performances of all nets
+plot((cumsum(perf_nn_mat)))
+plot(exp(cumsum(perf_nn_mat)))
+
+# mean MSE
+mean_MSE_nn<-apply(MSE_mat,2,mean)
+mean_MSE_nn
+
+paste("In the mean: ",100*(apply(MSE_mat,2,mean)[2]/apply(MSE_mat,2,mean)[1]-1),"% worse out-of-sample")
+paste("Best case: ",100*(min(MSE_mat[,"Out sample MSE"]/MSE_mat[,"In sample MSE"])-1),"% worse out of sample")
+paste("Worst case: ",100*(max(MSE_mat[,"Out sample MSE"]/MSE_mat[,"In sample MSE"])-1),"% worse out of sample")
+
+# Sharpe
+mean(sharpe_nn)
+
+#---------------------------------------------
+# 7.d
+# In- and out-of-sample forecast performances are negatively correlated
+cor(sharpe_nn,MSE_mat[,"In sample MSE"])
+# In- and out-of-sample trading performances are positively correlated
+cor(sharpe_nn,sharpe_nn_in)
+# Very ambiguous: distrust! 
+#---------------------------------------------
+# 7.e
+# Compute mean performance of all nets: 
+# Ideas:
+# -If in-sample perf is not informative about out-of-sample perf, then we cannot determine the best out-of-sample net.
+# -All nets are equally good or bad
+# -Assign equal weight to each net
+# -Mean performance: each net receives an equal share for trading
+# In forecast competitions, the consensus forecast (equal weighting of all predictors) generally performs best
+
+mean_perf_nn<-as.xts(apply(perf_nn_mat,1,mean))
+index(mean_perf_nn)<-index(perf_lm)
+plot(cbind(cumsum(mean_perf_nn),cumsum(perf_lm)),main=paste("NN cumulated performances out-of-sample, sharpe=",round(sharpe_nn,2),sep=""))
+
+# Sharpe of consensus forecast (this is not the same as mean of individual sharpes above)
+sharpe_mean_nn<-sqrt(365)*mean(mean_perf_nn)/sqrt(var(mean_perf_nn))
+sharpe_mean_nn
+#-----------------------------------------------
+# 7.f
+# Compare Sharpe of regression and of mean of NN
+sharpe_lm
+sharpe_mean_nn
+# Compare MSE forecast performances in- and out-of-sample
+mean_MSE_nn
+c(MSE.in.lm,MSE.out.lm)
+
+
+################################################################################################
+# Exercise 8
+#   Same as above but explanatory does rely on lag 1 only (not lags 1,2,...,6)
+data_mat<-data_mat[,1:2]
+#############################################################################################
+# Exercise 9
+#   Same as above but explanatory does rely on lag 1 only (not lags 1,2,...,6)
+in_out_sample_separator<-"2017-06-01"
+#############################################################################################
+
+
+
+
+
