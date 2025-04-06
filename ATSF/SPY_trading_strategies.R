@@ -1,11 +1,33 @@
+rm(list=ls())
+
+
+inst_pack<-rownames(installed.packages())
+
+if (!"neuralnet"%in%inst_pack)
+  install.packages("neuralnet")
+if (!"fGarch"%in%inst_pack)
+  install.packages("fGarch")
+if (!"xts"%in%inst_pack)
+  install.packages("xts")
+if (!"xts"%in%inst_pack)
+  install.packages("quantmod")
+
+
 # Installiere und lade benötigte Pakete
 if (!require(quantmod)) install.packages("quantmod", dependencies = TRUE)
 if (!require(ggplot2)) install.packages("ggplot2", dependencies = TRUE)
 if (!require(dplyr)) install.packages("dplyr", dependencies = TRUE)
+
+library(neuralnet)
+library(fGarch)
+library(xts)
+library(quantmod)
+
 # Lade die Pakete
 library(quantmod)
 library(ggplot2)
 library(dplyr)
+
 
 # ---- 1️⃣ Lade SPY-Daten von Yahoo Finance ----
 symbol <- "SPY"
@@ -76,7 +98,7 @@ acf(standard_residuals,main="Acf standardized residuals GARCH(1,1)",ylim=c(0,0.1
 x_fit<-as.ts(na.omit(diff(log(df$Open))))
 # GARCH(1,1)
 y.garch_11<-garchFit(~garch(1,1),data=x_fit,delta=2,include.delta=F,include.mean=F,trace=F)
-
+par(mfrow=c(1,1))
 ts.plot(x_fit)
 lines(y.garch_11@sigma.t,col="red")
 #-----------------
@@ -195,10 +217,11 @@ plot(nn)
 # In sample performance
 # 1. Without re-scaling: MSE based on transformed data
 MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*(max(data_mat[,1])-min(data_mat[,1])))^2)
+MSE.in.nn
 # 2. With re-scaling: MSE based on scale of original data
 scaling_term<-(max(data_mat[,1])-min(data_mat[,1]))
 MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*scaling_term)^2)
-
+MSE.in.nn
 
 # Out-of-sample performance
 # 1. Compute out-of-sample predictions based on transformed data
@@ -231,7 +254,7 @@ perf_nn<-(sign(predicted_nn))*target_out
 
 
 sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
-
+par(mfrow=c(1,1))
 plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample, sharpe=",round(sharpe_nn,2),sep=""))
 
 ####################################################################
@@ -384,7 +407,7 @@ test_set<-as.matrix(test_set)
 
 colnames(train_set)<-paste("lag",0:(ncol(train_set)-1),sep="")
 n <- colnames(train_set)
-# Model: target is current bitcoin, all other variables are explanatory  
+#  
 f <- as.formula(paste("lag0 ~", paste(n[!n %in% "lag0"], collapse = " + ")))
 
 tail(train_set)
@@ -399,6 +422,7 @@ plot(nn)
 # In sample performance
 # 1. Without re-scaling: MSE based on transformed data
 MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*(max(data_mat[,1])-min(data_mat[,1])))^2)
+MSE.in.nn
 # 2. With re-scaling: MSE based on scale of original data
 scaling_term<-(max(data_mat[,1])-min(data_mat[,1]))
 MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*scaling_term)^2)
@@ -438,6 +462,52 @@ sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
 par(mfrow=c(1,1))
 plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample, sharpe=",round(sharpe_nn,2),sep=""))
 
+###############################################################################3
+# repeat the nn fit with a bigger nn c(20,10)
+
+
+# Set/fix the random seed 
+set.seed(4)
+nn <- neuralnet(f,data=train_set,hidden=c(20,10),linear.output=F)  # ca. 15 min training
+
+#------------------------------------
+# plot(nn)
+
+# In sample performance
+# 1. Without re-scaling: MSE based on transformed data
+MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*(max(data_mat[,1])-min(data_mat[,1])))^2)
+MSE.in.nn
+# 2. With re-scaling: MSE based on scale of original data
+scaling_term<-(max(data_mat[,1])-min(data_mat[,1]))
+MSE.in.nn<-mean(((train_set[,1]-nn$net.result[[1]])*scaling_term)^2)
+
+
+# Out-of-sample performance
+# 1. Compute out-of-sample predictions based on transformed data
+# Provide test-data to predict: use explanatory columns 2:ncol(test_set) (First column is forecast target)
+pr.nn <- predict(nn,test_set[,2:ncol(test_set)])
+predicted_scaled<-pr.nn
+# Numbers are between 0 and 1
+tail(predicted_scaled)
+# Transform forecasts back to original data: rescale and shift by min(data_mat[,1])
+predicted_nn <- predicted_scaled*scaling_term+min(data_mat[,1])
+test.r <- test_set[,1]*scaling_term+min(data_mat[,1])
+# Check: test.r is the same as test[,1]
+test[,1]-test.r
+# Calculating MSE
+MSE.out.nn <- sum((test.r - predicted_nn)^2)/nrow(test_set)
+
+# Compare in-sample and out-of-sample
+c(MSE.in.nn,MSE.out.nn)
+
+#--------------------------------
+# Trading performance
+perf_nn<-(sign(predicted_nn))*target_out
+
+
+sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
+par(mfrow=c(1,1))
+plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample,nn(20,10), sharpe=",round(sharpe_nn,2),sep=""))
 
 
 
