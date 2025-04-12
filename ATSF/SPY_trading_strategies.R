@@ -483,26 +483,35 @@ c(MSE.in.nn,MSE.out.nn)
 # 4.f Trading performance
 perf_nn<-(sign(predicted_nn))*target_out
 
-
 sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
 par(mfrow=c(1,1))
 plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample, sharpe=",round(sharpe_nn,2),sep=""))
 
+
+
 ###############################################################################
-
-
-
-
+#==================================================================================
+  
+# SPY TRADING STRATEGIES 
 # overnigth-returns strategy
 
-# Erstelle Dataframe mit relevanten Spalten
-symbol <- "SPY"
-getSymbols(symbol, src = "yahoo", from = "1993-01-01", to = Sys.Date(), auto.assign = TRUE)
-df <- get(symbol)
+# DOWNLOADING THE DATA WILL BE DONE ONLY ONE TIME!
+# # Erstelle Dataframe mit relevanten Spalten
+# symbol <- "SPY"
+# getSymbols(symbol, src = "yahoo", from = "1993-01-01", to = Sys.Date(), auto.assign = TRUE)
+# df <- get(symbol)
+# 
+# df <- data.frame(Date = index(df),
+#                  Open = as.numeric(Op(df)),
+#                  Close = as.numeric(Cl(df)))
+# 
+# saveRDS(df, "SPY_data_project.rds")
 
-df <- data.frame(Date = index(df),
-                 Open = as.numeric(Op(df)),
-                 Close = as.numeric(Cl(df)))
+## Run code from here
+
+df <- readRDS("SPY_data_project.rds")
+
+
 
 # Berechne Renditen für alle drei Strategien
 df <- df %>%
@@ -589,9 +598,10 @@ dim(data_mat)
 head(data_mat)
 tail(data_mat)
 
-# Specify in- and out-of-sample episodes
-in_out_sample_separator <- index(data_mat)[round(dim(data_mat)[1]*0.8)] # "2018-10-08"
-in_out_sample_separator
+# # Specify in- and out-of-sample episodes
+# in_out_sample_separator <- index(data_mat)[round(dim(data_mat)[1]*0.8)] # "2018-10-12"
+
+in_out_sample_separator <- "2018-10-12"
 
 target_in<-data_mat[paste("/",in_out_sample_separator,sep=""),1]
 tail(target_in)
@@ -646,13 +656,14 @@ tail(train_set)
 
 # Set/fix the random seed 
 set.seed(4)
-nn <- neuralnet(f,data=train_set,hidden=c(20,10),linear.output=F)  # ca. 1 std training
+nn <- neuralnet(f,data=train_set,hidden=c(20,10),linear.output=F) 
+
+# setwd("C:/Users/Oscar/OneDrive - ZHAW/s - FS 2025/ATSF/Project/ATSP_project")
+
+# save(nn, file = "nn_model_20_10.RData")
 
 
-setwd("C:/Users/Oscar/OneDrive - ZHAW/s - FS 2025/ATSF/Project/ATSP_project")
-save(nn, file = "nn_model_20_10.RData")
-
-# to load
+# load the model
 # load("nn_model_20_10.RData")
 
 
