@@ -511,8 +511,6 @@ plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample, sharpe
 
 df <- readRDS("SPY_data_project.rds")
 
-
-
 # Berechne Renditen für alle drei Strategien
 df <- df %>%
   mutate(Open_log = log(Open),
@@ -621,8 +619,50 @@ tail(test)
 nrow(train)
 nrow(test)
 
+#-------------------------------------------
+# ## ========================================================================================
+
+# Fitting linear model to log-returns (could be applied to standardized log-returns: returns divided by vola)
+lm.fit <- lm(target_in~explanatory_in)#mean(target_in)plot(cumsum(target_in))plot(log(dat$Bid))
+summary(lm.fit)
+# Without intercept
+lm.fit <- lm(target_in~explanatory_in-1)
+summary(lm.fit)
+#----------------------------------------------
+# 
+# Predicted data from lm
+#   Without intercept
+predicted_lm<-explanatory_out%*%lm.fit$coef
+
+# Same as above single line of code (but more explicit: row-wise computation)
+for (i in 1:nrow(explanatory_out))
+{
+  predicted_lm[i,]<-sum(explanatory_out[i,]*lm.fit$coef)
+}  
+
+# With intercept: we have to add a column of 1s to the explanatory data (for the additional intercept)
+if (length(lm.fit$coef)>ncol(explanatory_out))
+  predicted_lm<-cbind(rep(1,nrow(explanatory_out)),explanatory_out)%*%lm.fit$coef
+
+head(predicted_lm)
+#------------------------------------------
+# 3.h
+# Test MSE: in-sample vs. out-of-sample
+MSE.in.lm<-mean(lm.fit$residuals^2)
+MSE.out.lm <- sum((predicted_lm - target_out)^2)/nrow(test)
+c(MSE.in.lm,MSE.out.lm)
+#--------------------------------
+# 3.i Trading performance
+perf_lm<-(sign(predicted_lm))*target_out
+
+
+sharpe_lm<-sqrt(365)*mean(perf_lm,na.rm=T)/sqrt(var(perf_lm,na.rm=T))
+par(mfrow=c(1,1))
+plot(cumsum(perf_lm),main=paste("Linear regression cumulated performances out-of-sample, sharpe=",round(sharpe_lm,2),sep=""))
+
+## ========================================================================================
 #-------------------------------------------------------------------------------
-#  Prepare the datasets
+#  Prepare the datasets for NN
 
 # Scaling data for the NN
 
@@ -656,7 +696,7 @@ tail(train_set)
 
 # Set/fix the random seed 
 set.seed(4)
-nn <- neuralnet(f,data=train_set,hidden=c(20,10),linear.output=F) 
+# nn <- neuralnet(f,data=train_set,hidden=c(20,10),linear.output=F) 
 
 # setwd("C:/Users/Oscar/OneDrive - ZHAW/s - FS 2025/ATSF/Project/ATSP_project")
 
@@ -709,5 +749,171 @@ sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
 par(mfrow=c(1,1))
 plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample,nn(20,10), sharpe=",round(sharpe_nn,2),sep=""))
 
+## +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# ALTERNATIVE "LAG 29"
+# Prepare Data using until lag 29
+
+data_mat_l_29 <- cbind(
+  x,
+  stats::lag(x, -1),
+  stats::lag(x, -2),
+  stats::lag(x, -3),
+  stats::lag(x, -4),
+  stats::lag(x, -5),
+  stats::lag(x, -6),
+  stats::lag(x, -7),
+  stats::lag(x, -8),
+  stats::lag(x, -9),
+  stats::lag(x, -10),
+  stats::lag(x, -11),
+  stats::lag(x, -12),
+  stats::lag(x, -13),
+  stats::lag(x, -14),
+  stats::lag(x, -15),
+  stats::lag(x, -16),
+  stats::lag(x, -17),
+  stats::lag(x, -18),
+  stats::lag(x, -19),
+  stats::lag(x, -20),
+  stats::lag(x, -21),
+  stats::lag(x, -22),
+  stats::lag(x, -23),
+  stats::lag(x, -24),
+  stats::lag(x, -25),
+  stats::lag(x, -26),
+  stats::lag(x, -27),
+  stats::lag(x, -28),
+  stats::lag(x, -29)
+)
+
+head(data_mat_l_29)
 
 
+# Check length of time series before na.exclude
+dim(data_mat_l_29)
+data_mat_l_29<-na.exclude(data_mat_l_29)
+# Check length of time series after removal of NAs
+dim(data_mat_l_29)
+head(data_mat_l_29)
+tail(data_mat_l_29)
+
+# # Specify in- and out-of-sample episodes
+# in_out_sample_separator <- index(data_mat)[round(dim(data_mat)[1]*0.8)] # "2018-10-12"
+
+in_out_sample_separator_l_29 <- "2018-10-12"
+
+target_in_l_29<-data_mat_l_29[paste("/",in_out_sample_separator_l_29,sep=""),1]
+tail(target_in_l_29)
+explanatory_in_l_29<-data_mat_l_29[paste("/",in_out_sample_separator_l_29,sep=""),2:ncol(data_mat_l_29)]
+tail(explanatory_in_l_29)
+
+target_out_l_29<-data_mat_l_29[paste(in_out_sample_separator_l_29,"/",sep=""),1]
+head(target_out_l_29)
+tail(target_out_l_29)
+explanatory_out_l_29<-data_mat_l_29[paste(in_out_sample_separator_l_29,"/",sep=""),2:ncol(data_mat_l_29)]
+
+
+train_l_29<-cbind(target_in_l_29,explanatory_in_l_29)
+test_l_29<-cbind(target_out_l_29,explanatory_out_l_29)
+head(test_l_29)
+tail(test_l_29)
+nrow(train_l_29)
+nrow(test_l_29)
+
+####################
+#  Prepare the datasets for NN
+
+# Scaling data for the NN
+
+maxs <- apply(data_mat_l_29, 2, max) 
+mins <- apply(data_mat_l_29, 2, min)
+# Transform data into [0,1]  
+scaled <- scale(data_mat_l_29, center = mins, scale = maxs - mins)
+
+apply(scaled,2,min)
+apply(scaled,2,max)
+#-----------------
+
+# Train-test split
+train_set_l_29 <- scaled[paste("/",in_out_sample_separator_l_29,sep=""),]
+test_set_l_29 <- scaled[paste(in_out_sample_separator_l_29,"/",sep=""),]
+
+train_set_l_29<-as.matrix(train_set_l_29)
+test_set_l_29<-as.matrix(test_set_l_29)
+#-----------------------------------
+
+colnames(train_set_l_29)<-paste("lag",0:(ncol(train_set_l_29)-1),sep="")
+n <- colnames(train_set_l_29)
+#  
+f <- as.formula(paste("lag0 ~", paste(n[!n %in% "lag0"], collapse = " + ")))
+
+tail(train_set_l_29)
+
+###====================================
+
+# fit a bigg enough NN -  c(20,10) for the alternative lag 29
+# the first try fitting a c(20,10) was not successful, so we first try a c(12,6)
+
+# Set/fix the random seed 
+set.seed(4)
+nn <- neuralnet(f,data=train_set_l_29,hidden=c(12,6),linear.output=F) 
+# getwd()
+# setwd("C:/Users/Oscar/OneDrive - ZHAW/s - FS 2025/ATSF/Project/ATSP_project")
+
+# save(nn, file = "nn_model_12_6_lag_29.RData")
+
+
+# load the model
+# load("nn_model_20_10.RData")
+
+
+#------------------------------------
+# plot(nn)
+
+# In sample performance
+# 1. Without re-scaling: MSE based on transformed data
+MSE.in.nn<-mean(((train_set_l_29[,1]-nn$net.result[[1]])*(max(data_mat_l_29[,1])-min(data_mat_l_29[,1])))^2)
+MSE.in.nn
+# 2. With re-scaling: MSE based on scale of original data
+scaling_term<-(max(data_mat_l_29[,1])-min(data_mat_l_29[,1]))
+MSE.in.nn_scaling_term<-mean(((train_set_l_29[,1]-nn$net.result[[1]])*scaling_term)^2)
+
+
+##################################################
+# Out-of-sample performance
+# 1. Compute out-of-sample predictions based on transformed data
+# Provide test-data to predict: use explanatory columns 2:ncol(test_set) (First column is forecast target)
+pr.nn <- predict(nn,test_set_l_29[,2:ncol(test_set_l_29)])
+predicted_scaled<-pr.nn
+# Numbers are between 0 and 1
+tail(predicted_scaled)
+
+# Transform forecasts back to original data: rescale and shift by min(data_mat[,1])
+predicted_nn <- predicted_scaled*scaling_term+min(data_mat_l_29[,1])
+head(predicted_nn)
+ts.plot(predicted_nn)
+test.r_l_19 <- test_set_l_29[,1]*scaling_term+min(data_mat_l_29[,1])
+# Check: test.r is the same as test[,1]
+# test[,1]-test.r
+# Calculating MSE
+MSE.out.nn <- sum((test.r_l_19 - predicted_nn)^2)/nrow(test_set_l_29)
+
+# Compare in-sample and out-of-sample
+c(MSE.in.nn,MSE.out.nn)
+
+#--------------------------------
+# Trading performance
+perf_nn<-(sign(predicted_nn))*target_out_l_29
+
+
+sharpe_nn<-sqrt(365)*mean(perf_nn,na.rm=T)/sqrt(var(perf_nn,na.rm=T))
+par(mfrow=c(1,1))
+plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample,nn(20,10), sharpe=",round(sharpe_nn,2),sep=""))
+
+
+# now we try to train a c(20,10) so that we can compare with the previos lag 12
+
+set.seed(4)
+nn <- neuralnet(f,data=train_set_l_29,hidden=c(20,10),linear.output=F) # takes less than 1 hour to converge
+# save(nn, file = "nn_model_20_10_lag_29.RData")
