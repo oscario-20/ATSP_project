@@ -29,7 +29,10 @@ library(ggplot2)
 library(dplyr)
 
 #################################################################################
-
+# path <- "C:/Users/Oscar/OneDrive - ZHAW/s - FS 2025/ATSF/Project/ATSP_project"
+# setwd(path)
+# getwd()
+########################################################################
 # ---- 1️⃣ Lade SPY-Daten von Yahoo Finance ----
 symbol <- "SPY"
 getSymbols(symbol, src = "yahoo", from = "1993-01-01", to = Sys.Date(), auto.assign = TRUE)
@@ -917,3 +920,82 @@ plot(cumsum(perf_nn),main=paste("NN cumulated performances out-of-sample,nn(20,1
 set.seed(4)
 nn <- neuralnet(f,data=train_set_l_29,hidden=c(20,10),linear.output=F) # takes less than 1 hour to converge
 # save(nn, file = "nn_model_20_10_lag_29.RData")
+
+
+# 12,6 lag 13 x 10 
+# 20,10 lag 13 x 10
+
+getwd()
+##############################################################
+
+# Train and save 10 NNs (12,6) using the 13 lag train_set
+
+train_and_save_nn <- function(train_set, number_neurons, f, nn_name) {
+  nn <- neuralnet(f, data = train_set, hidden = number_neurons, linear.output = TRUE)
+  saveRDS(nn, file = paste0(nn_name, ".rds"))
+}
+
+# Example: assume train_set, test_set, data_mat, and formula f are already defined.
+num_models <- 10
+number_neurons <- c(12, 6)
+neurons_str <- paste(number_neurons, collapse = "_")
+
+
+pb <- txtProgressBar(min = 1, max = num_models, style = 3)
+
+for (i in 1:num_models) {
+  nn_name <- paste0("nn_model_", neurons_str, "_", i)
+  train_and_save_nn(train_set, number_neurons, f, nn_name)
+  setTxtProgressBar(pb, i)
+}
+
+close(pb)
+
+paste0(as.character(number_neurons))
+
+#############################################################
+estimate_nn<-function(train_set,number_neurons,data_mat,test_set,f)
+{
+  nn <- neuralnet(f,data=train_set,hidden=number_neurons,linear.output=T)
+  
+  
+  # In sample performance
+  predicted_scaled_in_sample<-nn$net.result[[1]]
+  # Scale back from interval [0,1] to original log-returns
+  predicted_nn_in_sample<-predicted_scaled_in_sample*(max(data_mat[,1])-min(data_mat[,1]))+min(data_mat[,1])
+  # In-sample MSE
+  MSE.in.nn<-mean(((train_set[,1]-predicted_scaled_in_sample)*(max(data_mat[,1])-min(data_mat[,1])))^2)
+  
+  # Out-of-sample performance
+  # Compute out-of-sample forecasts
+  pr.nn <- predict(nn,as.matrix(test_set[,2:ncol(test_set)]))
+  predicted_scaled<-pr.nn
+  # Results from NN are normalized (scaled)
+  # Descaling for comparison
+  predicted_nn <- predicted_scaled*(max(data_mat[,1])-min(data_mat[,1]))+min(data_mat[,1])
+  test.r <- test_set[,1]*(max(data_mat[,1])-min(data_mat[,1]))+min(data_mat[,1])
+  # Calculating MSE
+  MSE.out.nn <- mean((test.r - predicted_nn)^2)
+  
+  # Compare in-sample and out-of-sample
+  MSE_nn<-c(MSE.in.nn,MSE.out.nn)
+  return(list(MSE_nn=MSE_nn,predicted_nn=predicted_nn,predicted_nn_in_sample=predicted_nn_in_sample))
+  
+}
+
+anzsim<-10
+# set.seed(0)
+number_neurons<-c(12,6)
+MSE_mat<-matrix(ncol=2,nrow=anzsim)
+colnames(MSE_mat)<-c("In sample MSE","Out sample MSE")
+
+pb <- txtProgressBar(min = 1, max = anzsim, style = 3)
+
+for (i in 1:anzsim)#i<-12
+{
+  MSE_mat[i,]<-estimate_nn(train_set,number_neurons,data_mat,test_set,f)$MSE_nn
+  print(c(i,MSE_mat[i,]))
+  setTxtProgressBar(pb, i)
+  
+}
+close(pb)
