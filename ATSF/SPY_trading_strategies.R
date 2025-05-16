@@ -932,10 +932,9 @@ getwd()
 
 train_and_save_nn <- function(train_set, number_neurons, f, nn_name) {
   nn <- neuralnet(f, data = train_set, hidden = number_neurons, linear.output = TRUE)
-  saveRDS(nn, file = paste0(nn_name, ".rds"))
+  save(nn, file = paste0(nn_name, ".RData"))
 }
 
-# Example: assume train_set, test_set, data_mat, and formula f are already defined.
 num_models <- 10
 number_neurons <- c(12, 6)
 neurons_str <- paste(number_neurons, collapse = "_")
@@ -951,7 +950,33 @@ for (i in 1:num_models) {
 
 close(pb)
 
-paste0(as.character(number_neurons))
+
+# --------------------------------
+
+# 
+
+# Train and save 10 NNs (20,10) using the 13 lag train_set
+
+train_and_save_nn <- function(train_set, number_neurons, f, nn_name) {
+  nn <- neuralnet(f, data = train_set, hidden = number_neurons, linear.output = TRUE)
+  save(nn, file = paste0(nn_name, ".RData"))
+}
+
+
+num_models <- 10
+number_neurons <- c(20, 10)
+neurons_str <- paste(number_neurons, collapse = "_")
+
+
+pb <- txtProgressBar(min = 1, max = num_models, style = 3)
+
+for (i in 1:num_models) {
+  nn_name <- paste0("nn_model_lag13__", neurons_str, "_", i)
+  train_and_save_nn(train_set, number_neurons, f, nn_name)
+  setTxtProgressBar(pb, i)
+}
+
+close(pb)
 
 #############################################################
 estimate_nn<-function(train_set,number_neurons,data_mat,test_set,f)
