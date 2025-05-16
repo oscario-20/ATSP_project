@@ -978,6 +978,12 @@ for (i in 1:num_models) {
 
 close(pb)
 
+# train just one nn 20_10 to check the problems we are getting
+set.seed(100)
+nn_name <- paste0("nn_model_lag13__", neurons_str, "_check")
+train_and_save_nn(train_set, number_neurons, f, nn_name)
+
+
 #############################################################
 estimate_nn<-function(train_set,number_neurons,data_mat,test_set,f)
 {
@@ -1024,3 +1030,5 @@ for (i in 1:anzsim)#i<-12
   
 }
 close(pb)
+
+head(train_set)
