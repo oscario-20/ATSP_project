@@ -943,7 +943,7 @@ neurons_str <- paste(number_neurons, collapse = "_")
 pb <- txtProgressBar(min = 1, max = num_models, style = 3)
 
 for (i in 1:num_models) {
-  nn_name <- paste0("nn_model_", neurons_str, "_", i)
+  nn_name <- paste0("nn_model_lag13__", neurons_str, "_", i)
   train_and_save_nn(train_set, number_neurons, f, nn_name)
   setTxtProgressBar(pb, i)
 }
