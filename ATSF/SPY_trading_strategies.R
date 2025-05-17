@@ -983,6 +983,17 @@ set.seed(100)
 nn_name <- paste0("nn_model_lag13__", neurons_str, "_check")
 train_and_save_nn(train_set, number_neurons, f, nn_name)
 
+##############
+
+# train 20_10 one by one, to be sure of convergence
+
+number_neurons <- c(20, 10)
+neurons_str <- paste(number_neurons, collapse = "_")
+nn_number_to_replace <- 7 
+nn_name <- paste0("nn_model_lag13__", neurons_str, "_",nn_number_to_replace )
+train_and_save_nn(train_set, number_neurons, f, nn_name)
+
+
 
 #############################################################
 estimate_nn<-function(train_set,number_neurons,data_mat,test_set,f)
