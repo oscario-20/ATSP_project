@@ -963,14 +963,14 @@ train_and_save_nn <- function(train_set, number_neurons, f, nn_name) {
 }
 
 
-num_models <- 10
-number_neurons <- c(20, 10)
+num_models <- 5
+number_neurons <- c(12, 6)
 neurons_str <- paste(number_neurons, collapse = "_")
 
 
 pb <- txtProgressBar(min = 1, max = num_models, style = 3)
 
-for (i in 1:num_models) {
+for (i in 11:(num_models+10)) {
   nn_name <- paste0("nn_model_lag13__", neurons_str, "_", i)
   train_and_save_nn(train_set, number_neurons, f, nn_name)
   setTxtProgressBar(pb, i)
@@ -989,7 +989,7 @@ train_and_save_nn(train_set, number_neurons, f, nn_name)
 
 number_neurons <- c(20, 10)
 neurons_str <- paste(number_neurons, collapse = "_")
-nn_number_to_replace <- 7 
+nn_number_to_replace <- 8 
 nn_name <- paste0("nn_model_lag13__", neurons_str, "_",nn_number_to_replace )
 train_and_save_nn(train_set, number_neurons, f, nn_name)
 
